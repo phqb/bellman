@@ -21,6 +21,7 @@ use std::cmp::Ordering;
 use std::fmt;
 use rand::{Rand, Rng};
 use std::num::Wrapping;
+use rand_core::RngCore;
 
 const MODULUS_R: Wrapping<u32> = Wrapping(64513);
 
@@ -40,6 +41,10 @@ impl Rand for Fr {
 }
 
 impl Field for Fr {
+    // fn random<R: RngCore>(rng: &mut R) -> Self {
+    //     unimplemented!()
+    // }
+
     fn zero() -> Self {
         Fr(Wrapping(0))
     }
@@ -396,6 +401,10 @@ impl CurveProjective for Fr {
     fn recommended_wnaf_for_num_scalars(_: usize) -> usize {
         3
     }
+
+    // fn random<R: RngCore>(rng: &mut R) -> Self {
+    //     unimplemented!()
+    // }
 }
 
 #[derive(Copy, Clone)]

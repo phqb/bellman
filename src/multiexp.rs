@@ -15,6 +15,14 @@ use super::source::*;
 use std::future::{Future};
 use std::task::{Context, Poll};
 use std::pin::{Pin};
+use log::{info, warn};
+use crate::gpu;
+use std::iter;
+
+
+
+
+
 
 extern crate futures;
 
@@ -24,6 +32,7 @@ use self::futures::executor::block_on;
 use super::worker::{Worker, WorkerFuture};
 
 use super::SynthesisError;
+use rand_core::RngCore;
 
 use cfg_if;
 
@@ -540,6 +549,75 @@ fn future_based_buffered_dense_multiexp_impl<G: CurveAffine>(
     this
 }
 
+
+
+/// Perform multi-exponentiation. The caller is responsible for ensuring the
+/// query size is the same as the number of exponents.
+pub fn multiexp_gpu<Q, D, G, S>(
+    pool: &Worker,
+    bases: S,
+    density_map: D,
+    exponents: Arc<Vec<<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr>>,
+    kern: &mut Option<gpu::LockedMultiexpKernel<G::Engine>>,
+) -> WorkerFuture< <G as CurveAffine>::Projective, SynthesisError>
+    where
+            for<'a> &'a Q: QueryDensity,
+            D: Send + Sync + 'static + Clone + AsRef<Q>,
+            G: CurveAffine,
+            G::Engine: pairing::Engine,
+            S: SourceBuilder<G>,
+{
+    if let Some(ref mut kern) = kern {
+        if let Ok(p) = kern.with(|k: &mut gpu::MultiexpKernel<G::Engine>| {
+            info!("start ready exponents and bases"); // 1s+
+            let mut exps = vec![exponents[0]; exponents.len()];
+            let mut n = 0;
+            for (&e, d) in exponents.iter().zip(density_map.as_ref().iter()) {
+                if d {
+                    exps[n] = e;
+                    n += 1;
+                }
+            }
+
+            let (bss, skip) = bases.clone().get();
+            info!("end ready exponents and bases");
+            k.multiexp(pool, bss, Arc::new(exps.clone()), skip, n)
+
+        }) {
+            return  pool.compute(move || Ok(p));
+        }
+    }
+
+    let c = if exponents.len() < 32 {
+        3u32
+    } else {
+        (f64::from(exponents.len() as u32)).ln().ceil() as u32
+    };
+
+    if let Some(query_size) = density_map.as_ref().get_query_size() {
+        // If the density map has a known query size, it should not be
+        // inconsistent with the number of exponents.
+
+        assert!(query_size == exponents.len());
+    }
+
+    info!("!!!!!!!!!!!!!!!!!begin multiexp_inner");
+    let future = multiexp_inner(pool, bases, density_map, exponents, 0, c, true);
+    info!("!!!!!!!!!!!!!!!!!end multiexp_inner");
+    #[cfg(feature = "gpu")]
+        {
+            // Do not give the control back to the caller till the
+            // multiexp is done. We may want to reacquire the GPU again
+            // between the multiexps.
+            let result = future.wait();
+            pool.compute(move || result)
+        }
+    #[cfg(not(feature = "gpu"))]
+        future
+}
+
+
+
 /// Perform multi-exponentiation. The caller is responsible for ensuring the
 /// query size is the same as the number of exponents.
 pub fn multiexp<Q, D, G, S>(
@@ -680,6 +758,19 @@ fn join_chunks<G: CurveProjective>
 
     Ok(higher)
 }
+// pub fn dense_multiexp_gpu<G: CurveAffine>(
+//     pool: &Worker,
+//     bases: & [G],
+//     exponents: & [<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr]
+// ) -> Result<<G as CurveAffine>::Projective, SynthesisError>{
+//
+//     if exponents.len() != bases.len() {
+//         return Err(SynthesisError::AssignmentMissing);
+//     }
+//
+//
+// }
+
 
 
 /// Perform multi-exponentiation. The caller is responsible for ensuring that
@@ -881,7 +972,7 @@ mod test {
         use rand::{self, Rand};
         use crate::pairing::bn256::Bn256;
 
-        const SAMPLES: usize = 1 << 22;
+        const SAMPLES: usize = 1 << 10;
 
         let pool = Worker::new();
 
@@ -1002,4 +1093,146 @@ mod test {
             }
         }
     }
+}
+
+
+pub fn create_multiexp_kernel<E>(_log_d: usize, priority: bool) -> Option<gpu::MultiexpKernel<E>>
+    where
+        E: pairing::Engine,
+{
+    match gpu::MultiexpKernel::<E>::create(priority) {
+        Ok(k) => {
+            info!("GPU Multiexp kernel instantiated!");
+            Some(k)
+        }
+        Err(e) => {
+            warn!("Cannot instantiate GPU Multiexp kernel! Error: {}", e);
+            None
+        }
+    }
+}
+
+
+#[cfg(feature = "gpu")]
+#[test]
+pub fn gpu_multiexp_consistency() {
+    use crate::pairing::bls12_381::Bls12;
+    use std::time::Instant;
+    use rand::{self, Rand};
+    // use std::env;
+
+    //  env::set_var("OCL_DEFAULT_DEVICE_TYPE","GPU");
+
+    const MAX_LOG_D: usize = 20;
+    const START_LOG_D: usize = 10;
+    let mut kern = Some(gpu::LockedMultiexpKernel::<Bls12>::new(MAX_LOG_D, false));
+    let pool = Worker::new();
+
+    let rng = &mut rand::thread_rng();
+
+
+    // let rng = &mut rand::thread_rng();
+    // let v = Arc::new((0..SAMPLES).map(|_| <Bls12 as ScalarEngine>::Fr::rand(rng).into_repr()).collect::<Vec<_>>());
+    // let g = Arc::new((0..SAMPLES).map(|_| <Bls12 as Engine>::G1::rand(rng).into_affine()).collect::<Vec<_>>());
+
+
+    let mut bases = (0..(1 << 10))
+        .map(|_| <Bls12 as Engine>::G1::rand(rng).into_affine())
+        .collect::<Vec<_>>();
+
+    for _ in 10..START_LOG_D {
+        bases = [bases.clone(), bases.clone()].concat();
+    }
+
+    for log_d in START_LOG_D..(MAX_LOG_D + 1) {
+        let g = Arc::new(bases.clone());
+
+        let samples = 1 << log_d;
+        println!("Testing Multiexp for {} elements...", samples);
+
+        let v = Arc::new(
+            (0..samples)
+                .map(|_| <Bls12 as ScalarEngine>::Fr::rand(rng).into_repr())
+                .collect::<Vec<_>>(),
+        );
+
+        let mut now = Instant::now();
+        let gpu = multiexp_gpu(&pool, (g.clone(), 0), FullDensity, v.clone(), &mut kern)
+            .wait()
+            .unwrap();
+        let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("GPU took {}ms.", gpu_dur);
+
+        println!("============================");
+
+        bases = [bases.clone(), bases.clone()].concat();
+    }
+}
+
+
+#[cfg(feature = "gpu")]
+#[test]
+pub fn gpu_multiexp_consistency_bn256() {
+    use rand::{self, Rand};
+    use crate::pairing::bn256::Bn256;
+    use std::time::Instant;
+    // use std::env;
+
+    //  env::set_var("OCL_DEFAULT_DEVICE_TYPE","GPU");
+
+    const MAX_LOG_D: usize = 20;
+    const START_LOG_D: usize = 10;
+    let mut kern = Some(gpu::LockedMultiexpKernel::<Bn256>::new(MAX_LOG_D, false));
+    let pool = Worker::new();
+
+    let rng = &mut rand::thread_rng();
+
+
+    // let v = Arc::new((0..SAMPLES).map(|_| <Bls12 as ScalarEngine>::Fr::rand(rng).into_repr()).collect::<Vec<_>>());
+    // let g = Arc::new((0..SAMPLES).map(|_| <Bls12 as Engine>::G1::rand(rng).into_affine()).collect::<Vec<_>>());
+
+    let mut bases = (0..(1 << 10))
+        .map(|_| <Bn256 as Engine>::G1::rand(rng).into_affine())
+        .collect::<Vec<_>>();
+
+    for _ in 10..START_LOG_D {
+        bases = [bases.clone(), bases.clone()].concat();
+    }
+
+    for log_d in START_LOG_D..(MAX_LOG_D + 1) {
+
+        let samples = 1 << log_d;
+
+        println!("Testing Multiexp for {} elements...", samples);
+
+        let v =  (0..samples).map(|_| <Bn256 as ScalarEngine>::Fr::rand(rng).into_repr()).collect::<Vec<_>>();
+        let g = bases.clone();
+        let mut now = Instant::now();
+        let dense = dense_multiexp(
+            &pool,
+            &g,
+            &v,
+        ).unwrap();
+
+        let cpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+
+        println!("CPU took {}ms.", cpu_dur);
+
+        let v = Arc::new(v);
+        let g = Arc::new(g);
+
+        let mut now = Instant::now();
+        let gpu = multiexp_gpu(&pool, (g.clone(), 0), FullDensity, v.clone(), &mut kern)
+            .wait()
+            .unwrap();
+        let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("GPU took {}ms.", gpu_dur);
+
+        println!("GPU accerlate {}x", cpu_dur/gpu_dur);
+
+        println!("============================");
+
+        bases = [bases.clone(), bases.clone()].concat();
+    }
+
 }

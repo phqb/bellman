@@ -1,5 +1,6 @@
 use crate::ff::*;
 use super::{PartialReductionField, PartialTwoBitReductionField};
+use rand_core::RngCore;
 
 #[derive(Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct FrRepr(pub [u64; 4usize]);
@@ -626,6 +627,10 @@ impl crate::ff::Field for Fr {
         let r7 = crate::ff::adc(r7, 0, &mut carry);
         self.mont_reduce(r0, r1, r2, r3, r4, r5, r6, r7);
     }
+
+    // fn random<R: RngCore>(rng: &mut R) -> Self {
+    //     unimplemented!()
+    // }
 }
 
 impl std::default::Default for Fr {

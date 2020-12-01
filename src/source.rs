@@ -22,6 +22,7 @@ pub trait SourceBuilder<G: CurveAffine>: Send + Sync + 'static + Clone {
     type Source: Source<G>;
 
     fn new(self) -> Self::Source;
+    fn get(self) -> (Arc<Vec<G>>, usize);
 }
 
 /// A source of bases, like an iterator.
@@ -37,6 +38,10 @@ impl<G: CurveAffine> SourceBuilder<G> for (Arc<Vec<G>>, usize) {
     type Source = (Arc<Vec<G>>, usize);
 
     fn new(self) -> (Arc<Vec<G>>, usize) {
+        (self.0.clone(), self.1)
+    }
+
+    fn get(self) -> (Arc<Vec<G>>, usize) {
         (self.0.clone(), self.1)
     }
 }

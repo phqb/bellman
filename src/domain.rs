@@ -26,6 +26,9 @@ use super::{
 
 use super::worker::Worker;
 pub use super::group::*;
+use crate::gpu;
+
+use log::{info, warn};
 
 pub struct EvaluationDomain<E: Engine, G: Group<E>> {
     coeffs: Vec<G>,
@@ -396,6 +399,23 @@ pub(crate) fn parallel_fft<E: Engine, T: Group<E>>(
         }
     });
 }
+
+pub fn create_fft_kernel<E>(log_d: usize, priority: bool) -> Option<gpu::FFTKernel<E>>
+    where
+        E: Engine,
+{
+    match gpu::FFTKernel::create(1 << log_d, priority) {
+        Ok(k) => {
+            info!("GPU FFT kernel instantiated!");
+            Some(k)
+        }
+        Err(e) => {
+            warn!("Cannot instantiate GPU FFT kernel! Error: {}", e);
+            None
+        }
+    }
+}
+
 
 // Test multiplying various (low degree) polynomials together and
 // comparing with naive evaluations.

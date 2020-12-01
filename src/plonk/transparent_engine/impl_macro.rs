@@ -1,3 +1,6 @@
+use rand_core::RngCore;
+
+
 macro_rules! transparent_engine_impl {
     (
         $engine:ident,
@@ -41,6 +44,10 @@ macro_rules! transparent_engine_impl {
             type Base = $fr;
             type Scalar = $fr;
             type Engine = $engine;
+
+            // fn random<R: RngCore>(rng: &mut R) -> Self {
+            //     unimplemented!()
+            // }
 
             fn zero() -> Self {
                 <$fr as crate::ff::Field>::zero()

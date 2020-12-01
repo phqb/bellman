@@ -17,7 +17,9 @@ rand = "0.4"
 bit-vec = "0.6"
 cfg-if = "1.*"
 
-pairing = {package = "pairing_ce", version = "0.24.*" }
+#pairing = {package = "pairing_ce", version = "0.24.*" }
+pairing = {path = "../pairing", package = "pairing_ce"}
+
 byteorder = "1"
 
 futures = {package = "futures", version = "0.3", default_features = false, features = ["executor"]}
@@ -41,8 +43,20 @@ blake2s_const = {version = "0.6", optional = true, path = "./src/plonk/blake2_co
 
 hex = "*"
 
+
+# add GPU
+thiserror = "1.0.10"
+rand_core = "0.5"
+ocl = { version = "0.19.4", package = "fil-ocl", optional = true }
+ff-cl-gen = { path = "../ff-cl-gen", optional = true }
+fs2 = { version = "0.4.3", optional = true }
+log = "0.4.8"
+#futures_01 = {package = "futures", version = "0.1"}
+
+
 [features]
-default = ["multicore", "plonk"]
+#default = ["multicore", "plonk"]
+default = ["multicore", "plonk", "gpu"]
 multicore = ["crossbeam", "futures/thread-pool"]
 sonic = ["tiny-keccak", "blake2-rfc"]
 gm17 = []
@@ -52,3 +66,4 @@ plonk = ["lazy_static", "tiny-keccak", "blake2s_const"]
 marlin = ["tiny-keccak", "blake2s_const"]
 wasm = ["web-sys"]
 asm = ["pairing/asm"]
+gpu = ["ocl", "ff-cl-gen", "fs2"]

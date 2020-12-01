@@ -1,6 +1,7 @@
 use crate::ff::*;
 
 use crate::pairing::Engine;
+use rand_core::RngCore;
 
 #[macro_use]
 mod impl_macro;
@@ -46,6 +47,7 @@ pub mod engine {
     use super::Fr;
 
     use super::impl_macro::*;
+    use rand_core::RngCore;
 
     transparent_engine_impl!{Transparent252, Fr}
 }
