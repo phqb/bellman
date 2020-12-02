@@ -6,6 +6,8 @@ use std::sync::Arc;
 use crate::multiexp;
 use crate::SynthesisError;
 
+use crate::gpu;
+
 pub trait CrsType {}
 
 pub struct CrsForMonomialForm;
@@ -340,19 +342,35 @@ pub fn commit_using_monomials<E: Engine>(
 
     println!("Scalars conversion taken {:?}", subtime.elapsed());
 
-    let subtime = Instant::now();
+    // let subtime = Instant::now();
+    //
+    // let res = multiexp::dense_multiexp::<E::G1Affine>(
+    //     &worker,
+    //     &crs.g1_bases[..scalars_repr.len()],
+    //     &scalars_repr
+    // )?;
+    //
+    // println!("Multiexp cpu taken {:?}", subtime.elapsed());
 
-    let res = multiexp::dense_multiexp::<E::G1Affine>(
+    let mut kern = Some(gpu::LockedMultiexpKernel::<E>::new(30, false));
+
+    let subtime = Instant::now();
+    let res_gpu = multiexp::dense_multiexp_gpu::<E::G1Affine>(
         &worker,
         &crs.g1_bases[..scalars_repr.len()],
-        &scalars_repr
+        &scalars_repr,
+        &mut kern
     )?;
 
-    println!("Multiexp taken {:?}", subtime.elapsed());
+    println!("Multiexp gpu taken {:?}", subtime.elapsed());
+
+    // assert_eq!(res, res_gpu);
+
 
     println!("Commtiment taken {:?}", now.elapsed());
 
-    Ok(res.into_affine())
+    // Ok(res.into_affine())
+    Ok(res_gpu.into_affine())
 }
 
 pub fn commit_using_values<E: Engine>(
