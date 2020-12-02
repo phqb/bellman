@@ -758,18 +758,45 @@ fn join_chunks<G: CurveProjective>
 
     Ok(higher)
 }
-// pub fn dense_multiexp_gpu<G: CurveAffine>(
-//     pool: &Worker,
-//     bases: & [G],
-//     exponents: & [<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr]
-// ) -> Result<<G as CurveAffine>::Projective, SynthesisError>{
-//
-//     if exponents.len() != bases.len() {
-//         return Err(SynthesisError::AssignmentMissing);
-//     }
-//
-//
-// }
+
+
+pub fn dense_multiexp_gpu<G: CurveAffine>(
+    pool: &Worker,
+    bases: & [G],
+    exponents: & [<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr],
+    kern: &mut Option<gpu::LockedMultiexpKernel<G::Engine>>
+) -> Result<<G as CurveAffine>::Projective, SynthesisError>
+{
+    if let Some(ref mut kern) = kern {
+        if let Ok(p) = kern.with(|k: &mut gpu::MultiexpKernel<G::Engine>| {
+            let mut exps = vec![exponents[0]; exponents.len()];
+            let mut n = 0;
+            for &e in exponents.iter(){
+                exps[n] = e;
+                n += 1;
+            }
+            let bas = bases.to_vec();
+
+            k.multiexp(pool, Arc::new(bas.clone()), Arc::new(exps.clone()), 0, n)
+        }) {
+            return  pool.compute(move || Ok(p)).wait();
+        }
+    }
+
+    let c = if exponents.len() < 32 {
+        3u32
+    } else {
+        let chunk_len = pool.get_chunk_size(exponents.len());
+        (f64::from(chunk_len as u32)).ln().ceil() as u32
+
+        // (f64::from(exponents.len() as u32)).ln().ceil() as u32
+    };
+
+    // dense_multiexp_inner_unrolled_with_prefetch(pool, bases, exponents, 0, c, true)
+    dense_multiexp_inner(pool, bases, exponents, 0, c, true)
+
+}
+
 
 
 
@@ -786,7 +813,7 @@ pub fn dense_multiexp<G: CurveAffine>(
         return Err(SynthesisError::AssignmentMissing);
     }
     // do some heuristics here
-    // we proceed chunks of all points, and all workers do the same work over 
+    // we proceed chunks of all points, and all workers do the same work over
     // some scalar width, so to have expected number of additions into buckets to 1
     // we have to take log2 from the expected chunk(!) length
     let c = if exponents.len() < 32 {
@@ -821,7 +848,7 @@ fn dense_multiexp_inner<G: CurveAffine>(
         pool.scope(bases.len(), |scope, chunk| {
             for (base, exp) in bases.chunks(chunk).zip(exponents.chunks(chunk)) {
                 let this_region_rwlock = arc.clone();
-                // let handle = 
+                // let handle =
                 scope.spawn(move |_| {
                     let mut buckets = vec![<G as CurveAffine>::Projective::zero(); (1 << c) - 1];
                     // Accumulate the result
@@ -864,14 +891,14 @@ fn dense_multiexp_inner<G: CurveAffine>(
                     let mut guard = match this_region_rwlock.lock() {
                         Ok(guard) => guard,
                         Err(_) => {
-                            panic!("poisoned!"); 
+                            panic!("poisoned!");
                             // poisoned.into_inner()
                         }
                     };
 
                     (*guard).add_assign(&acc);
                 });
-        
+
             }
         });
 
@@ -1218,6 +1245,15 @@ pub fn gpu_multiexp_consistency_bn256() {
 
         println!("CPU took {}ms.", cpu_dur);
 
+
+        let mut now = Instant::now();
+        let dense_gpu = dense_multiexp_gpu(&pool, &g, &v, &mut kern).unwrap();
+        let dense_gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("dense_gpu took {}ms.", dense_gpu_dur);
+
+        assert_eq!(dense, dense_gpu);
+
+
         let v = Arc::new(v);
         let g = Arc::new(g);
 
@@ -1231,6 +1267,7 @@ pub fn gpu_multiexp_consistency_bn256() {
         println!("GPU accerlate {}x", cpu_dur/gpu_dur);
 
         println!("============================");
+        assert_eq!(dense, gpu);
 
         bases = [bases.clone(), bases.clone()].concat();
     }
