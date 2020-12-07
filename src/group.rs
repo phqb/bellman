@@ -3,9 +3,11 @@ use crate::pairing::{
     CurveProjective
 };
 
+
 use crate::pairing::ff::{
     Field, 
-    PrimeField
+    PrimeField,
+    ScalarEngine
 };
 
 use super::{

@@ -1,8 +1,10 @@
 use ff::PrimeField;
 use super::multicore::*;
+use log::info;
 
 pub(crate) fn best_fft<F: PrimeField>(a: Vec<F>, worker: &Worker, omega: &F, log_n: u32) -> Vec<F>
 {
+    info!("******** begin best_fft in recursive_fft.rs");
     let log_cpus = worker.log_num_cpus();
 
     if log_n <= log_cpus {
@@ -10,6 +12,7 @@ pub(crate) fn best_fft<F: PrimeField>(a: Vec<F>, worker: &Worker, omega: &F, log
     } else {
         parallel_fft(a, worker, omega, log_n, log_cpus)
     }
+    info!("******** end best_fft in recursive_fft.rs");
 }
 
 pub(crate) fn recursive_fft<F: PrimeField>(a: &[F], omega: F, log_n: u32) -> Vec<F>

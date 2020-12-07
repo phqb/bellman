@@ -29,6 +29,7 @@ pub use super::group::*;
 use crate::gpu;
 
 use log::{info, warn};
+use crate::gpu::kernel;
 
 pub struct EvaluationDomain<E: Engine, G: Group<E>> {
     coeffs: Vec<G>,
@@ -159,6 +160,15 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
         best_fft(&mut self.coeffs, worker, &self.omega, self.exp);
     }
 
+    pub fn fft_gpu(
+        &mut self,
+        worker: &Worker,
+        kern: &mut Option<gpu::LockedFFTKernel<E>>,
+    ) -> gpu::GPUResult<()> {
+        best_fft_gpu(kern, &mut self.coeffs, worker, &self.omega, self.exp)?;
+        Ok(())
+    }
+
     pub fn ifft(&mut self, worker: &Worker)
     {
         best_fft(&mut self.coeffs, worker, &self.omegainv, self.exp);
@@ -175,6 +185,29 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
             }
         });
     }
+
+    pub fn ifft_gpu(
+        &mut self,
+        worker: &Worker,
+        kern: &mut Option<gpu::LockedFFTKernel<E>>,
+    ) -> gpu::GPUResult<()> {
+        best_fft_gpu(kern, &mut self.coeffs, worker, &self.omegainv, self.exp)?;
+
+        worker.scope(self.coeffs.len(), |scope, chunk| {
+            let minv = self.minv;
+
+            for v in self.coeffs.chunks_mut(chunk) {
+                scope.spawn(move |_| {
+                    for v in v {
+                        v.group_mul_assign(&minv);
+                    }
+                });
+            }
+        });
+
+        Ok(())
+    }
+
 
     pub fn distribute_powers(&mut self, worker: &Worker, g: E::Fr)
     {
@@ -285,6 +318,7 @@ impl<E: Engine, G: Group<E>> EvaluationDomain<E, G> {
     }
 }
 
+
 pub(crate) fn best_fft<E: Engine, T: Group<E>>(a: &mut [T], worker: &Worker, omega: &E::Fr, log_n: u32)
 {
     let log_cpus = worker.log_num_cpus();
@@ -295,6 +329,9 @@ pub(crate) fn best_fft<E: Engine, T: Group<E>>(a: &mut [T], worker: &Worker, ome
         parallel_fft(a, worker, omega, log_n, log_cpus);
     }
 }
+
+
+
 
 pub(crate) fn serial_fft<E: Engine, T: Group<E>>(a: &mut [T], omega: &E::Fr, log_n: u32)
 {
@@ -414,7 +451,53 @@ pub fn create_fft_kernel<E>(log_d: usize, priority: bool) -> Option<gpu::FFTKern
             None
         }
     }
+
 }
+
+fn best_fft_gpu<E: Engine, T: Group<E>>(
+    kern: &mut Option<gpu::LockedFFTKernel<E>>,
+    a: &mut [T],
+    worker: &Worker,
+    omega: &E::Fr,
+    log_n: u32,
+) -> gpu::GPUResult<()> {
+    if let Some(ref mut kern) = kern {
+        if kern
+            .with(|k: &mut gpu::FFTKernel<E>| gpu_fft(k, a, omega, log_n))
+            .is_ok()
+        {
+            return Ok(());
+        }
+    }
+
+    let log_cpus = worker.log_num_cpus();
+    if log_n <= log_cpus {
+        serial_fft(a, omega, log_n);
+    } else {
+        parallel_fft(a, worker, omega, log_n, log_cpus);
+    }
+
+    Ok(())
+}
+
+pub fn gpu_fft<E: Engine, T: Group<E>>(
+    kern: &mut gpu::FFTKernel<E>,
+    a: &mut [T],
+    omega: &E::Fr,
+    log_n: u32,
+) -> gpu::GPUResult<()> {
+    // EvaluationDomain module is supposed to work only with E::Fr elements, and not CurveProjective
+    // points. The Bellman authors have implemented an unnecessarry abstraction called Group<E>
+    // which is implemented for both PrimeField and CurveProjective elements. As nowhere in the code
+    // is the CurveProjective version used, T and E::Fr are guaranteed to be equal and thus have same
+    // size.
+    // For compatibility/performance reasons we decided to transmute the array to the desired type
+    // as it seems safe and needs less modifications in the current structure of Bellman library.
+    let a = unsafe { std::mem::transmute::<&mut [T], &mut [E::Fr]>(a) };
+    kern.radix_fft(a, omega, log_n)?;
+    Ok(())
+}
+
 
 
 // Test multiplying various (low degree) polynomials together and
@@ -573,11 +656,13 @@ fn test_fft_bn256() {
     use crate::pairing::bn256::Fr;
     use num_cpus;
 
+
     let cpus = num_cpus::get();
-    const SAMPLES: usize = 1 << 27;
+    const SAMPLES: usize = 1 << 20;
 
     let rng = &mut rand::thread_rng();
     let v1 = (0..SAMPLES).map(|_| Scalar::<Bn256>(Fr::rand(rng))).collect::<Vec<_>>();
+    let v2 = v1.clone();
 
     let mut v1 = EvaluationDomain::from_coeffs(v1).unwrap();
 
@@ -587,8 +672,62 @@ fn test_fft_bn256() {
 
     v1.ifft(&pool);
 
-    let duration_ns = start.elapsed().as_nanos() as f64;
-    println!("Elapsed {} ns for {} samples", duration_ns, SAMPLES);
-    let time_per_sample = duration_ns/(SAMPLES as f64);
-    println!("Tested on {} samples on {} CPUs with {} ns per field element multiplication", SAMPLES, cpus, time_per_sample);
+    let duration_cpu = start.elapsed().as_nanos() as f64;
+    println!("CPU Elapsed {} ns for {} samples", duration_cpu, SAMPLES);
+
+    let mut fft_kern = Some(gpu::LockedFFTKernel::<Bn256>::new(20, false));
+    let mut v2 = EvaluationDomain::from_coeffs(v2).unwrap();
+
+    let start = std::time::Instant::now();
+    v2.ifft_gpu(&pool, &mut fft_kern);
+    let duration_gpu = start.elapsed().as_nanos() as f64;
+    println!("GPU Elapsed {} ns for {} samples", duration_gpu, SAMPLES);
+
+    println!("Tested on {} samples cpu/gpu {}" , SAMPLES, duration_cpu/duration_gpu );
+}
+
+#[test]
+pub fn gpu_fft_consistency() {
+    use pairing::bls12_381::{Bls12, Fr};
+    use std::time::Instant;
+    use pairing::ff::ScalarEngine;
+    use rand::{self, Rand};
+
+    let rng = &mut rand::thread_rng();
+
+    let worker = Worker::new();
+    let log_cpus = worker.log_num_cpus();
+    let mut kern = gpu::FFTKernel::create(1 << 24, false).expect("Cannot initialize kernel!");
+
+    for log_d in 1..25 {
+        let d = 1 << log_d;
+
+        let elems = (0..d)
+            .map(|_| Scalar::<Bls12>(Fr::rand(rng)))
+            .collect::<Vec<_>>();
+
+        let mut v1 = EvaluationDomain::from_coeffs(elems.clone()).unwrap();
+        let mut v2 = EvaluationDomain::from_coeffs(elems.clone()).unwrap();
+
+        println!("Testing FFT for {} elements...", d);
+
+        let mut now = Instant::now();
+        gpu_fft(&mut kern, &mut v1.coeffs, &v1.omega, log_d).expect("GPU FFT failed!");
+        let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("GPU took {}ms.", gpu_dur);
+
+        now = Instant::now();
+        if log_d <= log_cpus {
+            serial_fft(&mut v2.coeffs, &v2.omega, log_d);
+        } else {
+            parallel_fft(&mut v2.coeffs, &worker, &v2.omega, log_d, log_cpus);
+        }
+        let cpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("CPU ({} cores) took {}ms.", 1 << log_cpus, cpu_dur);
+
+        println!("Speedup: x{}", cpu_dur as f32 / gpu_dur as f32);
+
+        assert!(v1.coeffs == v2.coeffs);
+        println!("============================");
+    }
 }

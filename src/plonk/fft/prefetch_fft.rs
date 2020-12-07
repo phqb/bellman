@@ -1,6 +1,7 @@
 use crate::ff::PrimeField;
 use crate::worker::*;
 use super::prefetch::*;
+use log::info;
 
 fn log2_floor(num: usize) -> u32 {
     assert!(num > 0);
@@ -16,6 +17,8 @@ fn log2_floor(num: usize) -> u32 {
 
 pub(crate) fn best_fft<F: PrimeField>(a: &mut [F], worker: &Worker, omega: &F, log_n: u32, use_cpus_hint: Option<usize>)
 {
+
+    info!("******** begin best_fft in prefetch_fft.rs");
     let log_cpus = if let Some(hint) = use_cpus_hint {
         assert!(hint <= worker.cpus);
         log2_floor(hint)
@@ -28,6 +31,8 @@ pub(crate) fn best_fft<F: PrimeField>(a: &mut [F], worker: &Worker, omega: &F, l
     } else {
         parallel_fft(a, worker, omega, log_n, log_cpus);
     }
+
+    info!("****** end best_fft in prefetch_fft.rs")
 }
 
 pub(crate) fn serial_fft<F: PrimeField>(a: &mut [F], omega: &F, log_n: u32)

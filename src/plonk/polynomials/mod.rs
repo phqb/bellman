@@ -9,6 +9,7 @@ use crate::plonk::fft::with_precomputation::FftPrecomputations;
 use crate::plonk::fft::cooley_tukey_ntt;
 use crate::plonk::fft::cooley_tukey_ntt::CTPrecomputations;
 use crate::plonk::fft::cooley_tukey_ntt::partial_reduction;
+use log::info;
 
 use crate::plonk::transparent_engine::PartialTwoBitReductionField;
 
@@ -266,7 +267,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
     pub fn from_roots(roots: Vec<F>, worker: &Worker) -> Result<Polynomial<F, Coefficients>, SynthesisError>
     {
-
+        info!("******* begin from_roots ");
         let coeffs_len = roots.len() + 1;
 
         let domain = Domain::<F>::new_for_size(coeffs_len as u64)?;
@@ -321,7 +322,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
         let result = result.expect("is some");
         let result = result.ifft(&worker);
-
+        info!("******* end from_roots ");
         Ok(result)
     }
 
@@ -490,7 +491,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
     pub fn filtering_lde(self, worker: &Worker, factor: usize) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
-        
+        info!("******* begin filtering_lde ");
         if factor == 1 {
             return Ok(self.fft(&worker));
         }
@@ -501,13 +502,13 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         let mut lde = self.coeffs;
         lde.resize(new_size as usize, F::zero());
         best_lde(&mut lde, worker, &domain.generator, domain.power_of_two as u32, factor);
-
+        info!("******* end filtering_lde ");
         Polynomial::from_values(lde)
     }
 
     pub fn lde_using_multiple_cosets_naive(self, worker: &Worker, factor: usize) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
-        
+        info!("******* begin lde_using_multiple_cosets_naive ");
         if factor == 1 {
             return Ok(self.fft(&worker));
         }
@@ -551,12 +552,13 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
                 });
             }
         });
-
+        info!("******* end lde_using_multiple_cosets_naive ");
         Polynomial::from_values(final_values)
     }
 
     pub fn lde_using_multiple_cosets(self, worker: &Worker, factor: usize) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
+        info!("******* begin lde_using_multiple_cosets ");
         
         if factor == 1 {
             return Ok(self.fft(&worker));
@@ -623,7 +625,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
                 });
             }
         });
-
+        info!("******* end lde_using_multiple_cosets ");
         Polynomial::from_values(final_values)
     }
 
@@ -635,7 +637,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
     ) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
         debug_assert_eq!(self.size(), precomputed_omegas.domain_size());
-        
+        info!("******* begin lde_using_multiple_cosets_with_precomputation ");
         if factor == 1 {
             return Ok(self.fft(&worker));
         }
@@ -696,7 +698,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
                 });
             }
         });
-
+        info!("******* end lde_using_multiple_cosets_with_precomputation ");
         Polynomial::from_values(final_values)
     }
 
@@ -709,7 +711,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         use std::time::Instant;
         debug_assert!(self.coeffs.len().is_power_of_two());
         debug_assert_eq!(self.size(), precomputed_omegas.domain_size());
-        
+        info!("******* begin lde_using_bitreversed_ntt ");
         if factor == 1 {
             return Ok(self.fft(&worker));
         }
@@ -814,7 +816,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         //         });
         //     }
         // });
-
+        info!("******* end lde_using_bitreversed_ntt ");
         Polynomial::from_values(final_values)
     }
 
@@ -1002,7 +1004,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
     pub fn coset_filtering_lde(mut self, worker: &Worker, factor: usize) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
-        
+        info!("******* begin coset_filtering_lde ");
         if factor == 1 {
             return Ok(self.coset_fft(&worker));
         }
@@ -1015,13 +1017,13 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         let mut lde = self.coeffs;
         lde.resize(new_size as usize, F::zero());
         best_lde(&mut lde, worker, &domain.generator, domain.power_of_two as u32, factor);
-
+        info!("******* end coset_filtering_lde ");
         Polynomial::from_values(lde)
     }
 
     pub fn coset_lde_using_multiple_cosets_naive(self, worker: &Worker, factor: usize) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
-
+        info!("******* begin coset_lde_using_multiple_cosets_naive ");
         if factor == 1 {
             return Ok(self.coset_fft(&worker));
         }
@@ -1059,7 +1061,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
                 });
             }
         });
-
+        info!("******* end coset_lde_using_multiple_cosets_naive ");
 
         Polynomial::from_values(final_values)
     }
@@ -1135,8 +1137,10 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
     pub fn fft(mut self, worker: &Worker) -> Polynomial<F, Values>
     {
+        info!("******* begin fft in polynomials");
         debug_assert!(self.coeffs.len().is_power_of_two());
         best_fft(&mut self.coeffs, worker, &self.omega, self.exp, None);
+        info!("******* end fft in polynomials");
 
         Polynomial::<F, Values> {
             coeffs: self.coeffs,
@@ -1151,6 +1155,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
     pub fn coset_fft(mut self, worker: &Worker) -> Polynomial<F, Values>
     {
+        info!("**** begin coset_fft");
         debug_assert!(self.coeffs.len().is_power_of_two());
         self.distribute_powers(worker, F::multiplicative_generator());
         self.fft(worker)
@@ -1158,6 +1163,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
     pub fn coset_fft_for_generator(mut self, worker: &Worker, gen: F) -> Polynomial<F, Values>
     {
+        info!("**** begin coset_fft_for_generator");
         debug_assert!(self.coeffs.len().is_power_of_two());
         self.distribute_powers(worker, gen);
         self.fft(worker)
@@ -1370,6 +1376,7 @@ impl<F: PrimeField> Polynomial<F, Values> {
 
     pub fn ifft(mut self, worker: &Worker) -> Polynomial<F, Coefficients>
     {
+        info!("***** begin ifft in polynomials.");
         debug_assert!(self.coeffs.len().is_power_of_two());
         best_fft(&mut self.coeffs, worker, &self.omegainv, self.exp, None);
 
@@ -1385,6 +1392,8 @@ impl<F: PrimeField> Polynomial<F, Values> {
             }
         });
 
+        info!("***** end ifft in polynomials.");
+
         Polynomial::<F, Coefficients> {
             coeffs: self.coeffs,
             exp: self.exp,
@@ -1398,21 +1407,24 @@ impl<F: PrimeField> Polynomial<F, Values> {
 
     pub fn icoset_fft(self, worker: &Worker) -> Polynomial<F, Coefficients>
     {
+        info!("**** begin icoset_fft");
         debug_assert!(self.coeffs.len().is_power_of_two());
         let geninv = self.geninv;
         let mut res = self.ifft(worker);
         res.distribute_powers(worker, geninv);
-
+        info!("**** end icoset_fft");
         res
     }
 
     pub fn icoset_fft_for_generator(self, worker: &Worker, coset_generator: &F) -> Polynomial<F, Coefficients>
     {
+
+        info!("**** begin icoset_fft_for_generator");
         debug_assert!(self.coeffs.len().is_power_of_two());
         let geninv = coset_generator.inverse().expect("must exist");
         let mut res = self.ifft(worker);
         res.distribute_powers(worker, geninv);
-
+        info!("**** end icoset_fft_for_generator");
         res
     }
 
@@ -2218,6 +2230,8 @@ impl<F: PartialTwoBitReductionField> Polynomial<F, Values> {
         precomputed_omegas: &P,
         coset_generator: &F
     ) -> Result<Polynomial<F, Coefficients>, SynthesisError> {
+        info!("**** begin ifft_using_bitreversed_ntt_with_partial_reduction");
+
         if self.coeffs.len() <= worker.cpus * 4 {
             return Ok(self.ifft(&worker));
         }
@@ -2248,6 +2262,8 @@ impl<F: PartialTwoBitReductionField> Polynomial<F, Values> {
             this.distribute_powers(&worker, geninv);
         }
 
+        info!("**** end ifft_using_bitreversed_ntt_with_partial_reduction");
+
         Ok(this)
     }
 }
@@ -2261,7 +2277,11 @@ impl<F: PrimeField> Polynomial<F, Values> {
         precomputed_omegas: &P,
         coset_generator: &F
     ) -> Result<Polynomial<F, Coefficients>, SynthesisError> {
+
+        info!("**** begin ifft_using_bitreversed_ntt");
+
         if self.coeffs.len() <= worker.cpus * 4 {
+            info!("*** using ifft");
             return Ok(self.ifft(&worker));
         }
 
@@ -2290,6 +2310,8 @@ impl<F: PrimeField> Polynomial<F, Values> {
             this.distribute_powers(&worker, geninv);
         }
 
+        info!("**** end ifft_using_bitreversed_ntt");
+
         Ok(this)
     }
 }
@@ -2304,7 +2326,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
     ) -> Result<Polynomial<F, Values>, SynthesisError> {
         debug_assert!(self.coeffs.len().is_power_of_two());
         debug_assert_eq!(self.size(), precomputed_omegas.domain_size());
-        
+        info!("**** begin bitreversed_lde_using_bitreversed_ntt");
         if factor == 1 {
             return Ok(self.fft(&worker));
         }
@@ -2399,6 +2421,8 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
             }
         });
 
+        info!("**** end bitreversed_lde_using_bitreversed_ntt");
+
         Polynomial::from_values(result)
     }
 
@@ -2410,6 +2434,9 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         precomputed_omegas: &P,
         coset_generator: &F
     ) -> Result<Polynomial<F, Values>, SynthesisError> {
+
+        info!("**** begin fft_using_bitreversed_ntt");
+
         if self.coeffs.len() <= worker.cpus * 4 {
             return Ok(self.coset_fft_for_generator(&worker, *coset_generator));
         }
@@ -2426,6 +2453,8 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         
         this.bitreverse_enumeration(&worker);
 
+        info!("**** end fft_using_bitreversed_ntt");
+
         Ok(this)
     }
 
@@ -2437,6 +2466,8 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         precomputed_omegas: &P,
         coset_generator: &F
     ) -> Result<Polynomial<F, Values>, SynthesisError> {
+        info!("**** begin fft_using_bitreversed_ntt_output_bitreversed");
+
         if self.coeffs.len() <= worker.cpus * 4 {
             return Ok(self.coset_fft_for_generator(&worker, *coset_generator));
         }
@@ -2450,7 +2481,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
         let exp = this.exp;
         cooley_tukey_ntt::best_ct_ntt(&mut coeffs, worker, exp, Some(worker.cpus), precomputed_omegas);
         let this = Polynomial::from_values(coeffs)?;
-    
+        info!("**** end fft_using_bitreversed_ntt_output_bitreversed");
         Ok(this)
     }
 }

@@ -1,6 +1,7 @@
 use crate::pairing::ff::PrimeField;
 use crate::worker::*;
 use crate::plonk::domains::*;
+use log::info;
 
 pub(crate) mod partial_reduction;
 
@@ -176,6 +177,7 @@ pub(crate) fn best_ct_ntt<F: PrimeField, P: CTPrecomputations<F>>(
     precomputed_omegas: &P
 )
 {
+    info!("**** begin best_ct_ntt");
     let log_cpus = if let Some(hint) = use_cpus_hint {
         assert!(hint <= worker.cpus);
         let hint = if hint > 0 {
@@ -194,6 +196,8 @@ pub(crate) fn best_ct_ntt<F: PrimeField, P: CTPrecomputations<F>>(
     } else {
         parallel_ct_ntt(a, worker, log_n, log_cpus, precomputed_omegas);
     }
+
+    info!("**** end best_ct_ntt");
 }
 
 pub(crate) fn serial_ct_ntt<F: PrimeField, P: CTPrecomputations<F>>(

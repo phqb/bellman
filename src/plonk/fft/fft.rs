@@ -1,5 +1,8 @@
 use crate::pairing::ff::PrimeField;
 use crate::worker::*;
+use crate::gpu;
+use pairing::Engine;
+
 
 fn log2_floor(num: usize) -> u32 {
     assert!(num > 0);
@@ -13,6 +16,7 @@ fn log2_floor(num: usize) -> u32 {
     pow
 }
 
+// important
 pub(crate) fn best_fft<F: PrimeField>(a: &mut [F], worker: &Worker, omega: &F, log_n: u32, use_cpus_hint: Option<usize>)
 {
     let log_cpus = if let Some(hint) = use_cpus_hint {
@@ -34,6 +38,8 @@ pub(crate) fn best_fft<F: PrimeField>(a: &mut [F], worker: &Worker, omega: &F, l
         parallel_fft(a, worker, omega, log_n, log_cpus);
     }
 }
+
+
 
 pub(crate) fn serial_fft<F: PrimeField>(a: &mut [F], omega: &F, log_n: u32)
 {

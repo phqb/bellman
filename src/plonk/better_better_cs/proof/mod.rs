@@ -288,7 +288,8 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         setup: &Setup<E, C>,
         mon_crs: &Crs<E, CrsForMonomialForm>,
         transcript_params: Option<T::InitializationParameters>,
-    ) -> Result<Proof<E, C>, SynthesisError> {
+    ) -> Result<Proof<E, C>, SynthesisError>
+    {
         assert!(S::PRODUCE_WITNESS);
         assert!(self.is_finalized);
 
@@ -331,7 +332,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
                 values_storage.setup_map.insert(key, poly);
             }
         } else {
-            // compute from setup
+            // compute from setup: much time  - multi threads
             for idx in 0..num_state_polys {
                 let key = PolyIdentifier::PermutationPolynomial(idx);
                 // let vals = setup.permutation_monomials[idx].clone().fft(&worker).into_coeffs();
@@ -351,6 +352,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
             self.max_constraint_degree.next_power_of_two()
         );
 
+        // much time - multi thread
         let mut monomials_storage = Self::create_monomial_storage(
             &worker, 
             &omegas_inv_bitreversed, 
@@ -917,6 +919,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
 
             let input_values = self.input_assingments.clone();
 
+            // much much much time
             let mut t = gate.contribute_into_quotient_for_public_inputs(
                 required_domain_size,
                 &input_values,
