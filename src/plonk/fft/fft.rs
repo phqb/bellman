@@ -27,6 +27,27 @@ fn log2_floor(num: usize) -> u32 {
 }
 
 
+pub(crate) fn bit_rev_best_ct_ntt_2_best_fft_gpu<F: PrimeField>(
+    a: &mut [F],
+    worker: &Worker,
+    omega: &F,
+    log_n: u32,
+)
+{
+    best_fft_bn256_gpu(a, worker, omega, log_n, None);
+    let poly_size = a.len();
+    let log_n = log_n as usize;
+    for k in 0..poly_size {
+        let rk = ntt_bitreverse(k, log_n);
+        if k < rk {
+            a.swap(rk, k);
+        }
+    }
+
+}
+
+
+// can only be used to omega, cannot be used omegaInv
 pub(crate) fn best_ct_ntt_2_best_fft_gpu<F: PrimeField>(
     a: &mut [F],
     worker: &Worker,

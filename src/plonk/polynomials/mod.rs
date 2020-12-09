@@ -12,7 +12,7 @@ use crate::plonk::fft::cooley_tukey_ntt::partial_reduction;
 use log::info;
 
 use crate::plonk::transparent_engine::PartialTwoBitReductionField;
-use crate::plonk::fft::fft::{best_fft_bn256_gpu, best_ct_ntt_2_best_fft_gpu};
+use crate::plonk::fft::fft::{best_fft_bn256_gpu, bit_rev_best_ct_ntt_2_best_fft_gpu};
 
 pub trait PolynomialForm: Sized + Copy + Clone {}
 
@@ -2287,9 +2287,17 @@ impl<F: PrimeField> Polynomial<F, Values> {
         }
 
         let mut coeffs: Vec<_> = self.coeffs;
+        let mut coeffs_2 = coeffs.clone();
         let exp = self.exp;
+
         cooley_tukey_ntt::best_ct_ntt(&mut coeffs, worker, exp, Some(worker.cpus), precomputed_omegas);
+
+        //
+        // let poly_size = coeffs_2.len();
+        // bit_rev_best_ct_ntt_2_best_fft_gpu(&mut coeffs_2, worker, );
+
         let mut this = Polynomial::from_coeffs(coeffs)?;
+
         
         this.bitreverse_enumeration(&worker);
 
@@ -2419,6 +2427,7 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
                         distribute_powers_with_num_cpus(&mut r[from..to], &worker, coset_generator, num_cpus_hint.expect("is some"));
                     }
                     cooley_tukey_ntt::best_ct_ntt(&mut r[from..to], &worker, log_n, num_cpus_hint, precomputed_omegas);
+                    // best_ct_ntt_2_best_fft_gpu(&mut r[from..to], &worker, poly_size);
                 });
             }
         });
@@ -2721,22 +2730,25 @@ fn test_poly_fft_ctt_consistency(){
     use crate::domain::best_fft as best_fft_domain;
     use crate::gpu::{self, LockedFFTKernel};
     use crate::domain::{gpu_fft, EvaluationDomain};
-    use crate::plonk::fft::cooley_tukey_ntt::BitReversedOmegas;
-    use crate::plonk::fft::fft::{parallel_fft, best_ct_ntt_2_best_fft_gpu};
+    use crate::plonk::fft::cooley_tukey_ntt::{BitReversedOmegas,OmegasInvBitreversed};
+    use crate::plonk::fft::fft::{parallel_fft, bit_rev_best_ct_ntt_2_best_fft_gpu,best_ct_ntt_2_best_fft_gpu};
     use crate::plonk::fft::cooley_tukey_ntt::{parallel_ct_ntt,serial_ct_ntt, best_ct_ntt};
     use crate::plonk::fft::cooley_tukey_ntt::bitreverse as ntt_bitreverse;
 
-    let max_log = 10;
+    let max_log = 6;
     let max_size = 1 << max_log;
     let worker = Worker::new();
 
     let mut scalars_a = crate::kate_commitment::test::make_random_field_elements::<Fr>(&worker, max_size);
     let mut scalars_b = scalars_a.clone();
     let mut scalars_c = scalars_a.clone();
+    let mut scalars_d = scalars_a.clone();
+
 
     let poly_a = Polynomial::from_coeffs(scalars_a[..].to_vec()).unwrap();
     let poly_b = Polynomial::from_coeffs(scalars_b[..].to_vec()).unwrap();
     let poly_c = Polynomial::from_coeffs(scalars_c[..].to_vec()).unwrap();
+    let poly_d = Polynomial::from_coeffs(scalars_c[..].to_vec()).unwrap();
 
     let poly_size = poly_a.size();
     let poly_size = poly_size.next_power_of_two();
@@ -2769,5 +2781,56 @@ fn test_poly_fft_ctt_consistency(){
     let mut poly_c_coff = poly_c.into_coeffs();
     best_ct_ntt_2_best_fft_gpu(&mut poly_c_coff, &worker, poly_c_size);
     assert_eq!(poly_a_coff, poly_c_coff);
+
+}
+
+#[test]
+fn test_omegas_inv_ntt_ftt_consistency()
+{
+    use crate::pairing::bn256::{Bn256,Fr};
+    use crate::ff::{Field, PrimeField};
+    use crate::worker::Worker;
+    use crate::plonk::polynomials::Polynomial;
+    use crate::domain::Scalar;
+    use crate::domain::best_fft as best_fft_domain;
+    use crate::gpu::{self, LockedFFTKernel};
+    use crate::domain::{gpu_fft, EvaluationDomain};
+    use crate::plonk::fft::cooley_tukey_ntt::{BitReversedOmegas,OmegasInvBitreversed};
+    use crate::plonk::fft::fft::{parallel_fft, bit_rev_best_ct_ntt_2_best_fft_gpu};
+    use crate::plonk::fft::cooley_tukey_ntt::{parallel_ct_ntt,serial_ct_ntt, best_ct_ntt};
+    use crate::plonk::fft::cooley_tukey_ntt::bitreverse as ntt_bitreverse;
+
+    let max_log = 10;
+    let max_size = 1 << max_log;
+    let worker = Worker::new();
+
+    let mut scalars_a = crate::kate_commitment::test::make_random_field_elements::<Fr>(&worker, max_size);
+    let mut scalars_b = scalars_a.clone();
+
+    let poly_a = Polynomial::from_coeffs(scalars_a[..].to_vec()).unwrap();
+    let poly_b = Polynomial::from_coeffs(scalars_b[..].to_vec()).unwrap();
+
+    let poly_size = poly_a.size();
+    let poly_size = poly_size.next_power_of_two();
+
+    let poly_a_omega = poly_a.omegainv;
+    let mut poly_a_coff = poly_a.into_coeffs();
+    best_fft_bn256_gpu(&mut poly_a_coff, &worker, &poly_a_omega, max_log, None);
+
+    let poly_b_omega = poly_b.omega;
+    let mut poly_b_coff = poly_b.into_coeffs();
+    let precomp = OmegasInvBitreversed::<Fr>::new_for_domain_size(poly_size);
+    // parallel_ct_ntt(&mut poly_b_coff, &worker, log_n, worker.log_num_cpus(), &precomp);
+    best_ct_ntt(&mut poly_b_coff, &worker, max_log, None, &precomp);
+
+    let log_n = max_log as usize;
+    for k in 0..poly_size {
+        let rk = ntt_bitreverse(k, log_n);
+        if k < rk {
+            poly_a_coff.swap(rk, k);
+        }
+    }
+    assert_eq!(poly_a_coff, poly_b_coff);
+
 
 }
