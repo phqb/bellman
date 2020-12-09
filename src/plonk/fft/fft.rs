@@ -1,7 +1,14 @@
 use crate::pairing::ff::PrimeField;
 use crate::worker::*;
-use crate::gpu;
-use pairing::Engine;
+use crate::gpu::{self, GPUError, LockedFFTKernel};
+
+use crate::pairing::Engine;
+
+use crate::pairing::bn256::{self, Bn256};
+use crate::domain::{EvaluationDomain, Scalar};
+use crate::domain::{self,best_fft_gpu};
+
+use log::info;
 
 
 fn log2_floor(num: usize) -> u32 {
@@ -15,6 +22,64 @@ fn log2_floor(num: usize) -> u32 {
 
     pow
 }
+
+pub(crate) fn best_fft_bn256_gpu<F: PrimeField>(
+    a: &mut [F],
+    worker: &Worker,
+    omega: &F,
+    log_n: u32,
+    use_cpus_hint: Option<usize>
+)
+{
+    info!("begin best_fft_bn256_gpu");
+    let mut fft_kern = Some(LockedFFTKernel::<Bn256>::new(log_n as usize, false));
+    let a = unsafe { std::mem::transmute::<&mut [F], &mut [Scalar::<Bn256>]>(a) };
+    let omega = unsafe{std::mem::transmute::<&F, &bn256::Fr>(omega)};
+    best_fft_gpu(&mut fft_kern, a, &worker, omega,log_n).unwrap();
+    drop(fft_kern);
+    info!("end best_fft_bn256_gpu");
+}
+
+// #### some unkown bugs
+// pub(crate) fn best_fft_bn256_gpu<F: PrimeField>(
+//     a: &mut [F],
+//     worker: &Worker,
+//     omega: &F,
+//     log_n: u32,
+//     use_cpus_hint: Option<usize>
+// )
+// {
+//     if let Some(ref mut kern) = kern {
+//
+//         let b = unsafe { std::mem::transmute::<&mut [F], &mut [Scalar::<Bn256>]>(a) };
+//         let mut c: Vec<Scalar<Bn256>> = b.into_iter().map(|e| (*e)).collect();
+//         let omega = unsafe{std::mem::transmute::<&F, &bn256::Fr>(omega)};
+//
+//         // if kern
+//         //     .with(|k: &mut gpu::FFTKernel<Bn256>| gpu_fft(k, b, omega, log_n))
+//         //     .is_ok()
+//         // {
+//         //     return Ok(());
+//         // }
+//         // else {
+//         //    return Err(GPUError::Simple("GPU accelerator does not correctly execute"));
+//         // }
+//
+//         if kern
+//             .with(|k: &mut gpu::FFTKernel<Bn256>| gpu_fft(k, &mut c, omega, log_n))
+//             .is_ok()
+//         {
+//             return Ok(());
+//         }
+//         else {
+//             return Err(GPUError::Simple("GPU accelerator does not correctly execute"));
+//         }
+//
+//     }
+//     best_fft(a, worker, omega, log_n, use_cpus_hint);
+//     return Ok(())
+// }
+
 
 // important
 pub(crate) fn best_fft<F: PrimeField>(a: &mut [F], worker: &Worker, omega: &F, log_n: u32, use_cpus_hint: Option<usize>)

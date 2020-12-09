@@ -32,7 +32,6 @@ fn bitreverse_naive(mut n: u32, l: u32) -> u32 {
     r
 }
 
-
 pub struct BitReversedOmegas<F: PrimeField> {
     pub omegas: Vec<F>,
     pub(crate) domain_size: usize
@@ -697,7 +696,75 @@ mod test {
             assert!(res1 == res2);
         }
     }
+
+
+    #[test]
+    fn test_fft_ctt_consistency() {
+        use rand::{XorShiftRng, SeedableRng, Rand, Rng};
+        use crate::plonk::transparent_engine::proth::Fr;
+        use crate::plonk::polynomials::*;
+        use std::time::Instant;
+        use super::*;
+        use crate::worker::*;
+        use crate::plonk::commitments::transparent::utils::*;
+        use crate::plonk::fft::fft::parallel_fft;
+        use super::CTPrecomputations;
+        use super::BitReversedOmegas;
+        use crate::plonk::domains::Domain;
+
+        let poly_sizes = vec![1_000_000, 2_000_000, 4_000_000];
+
+        // let poly_sizes = vec![1000usize];
+
+        let worker = Worker::new();
+
+        for poly_size in poly_sizes.into_iter() {
+            let poly_size = poly_size as usize;
+            let poly_size = poly_size.next_power_of_two();
+            let precomp = BitReversedOmegas::<Fr>::new_for_domain_size(poly_size);
+            let domain = Domain::<Fr>::new_for_size(poly_size as u64).unwrap();
+
+            let omega = domain.generator;
+            let log_n = domain.power_of_two as u32;
+
+            let res1 = {
+                let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+                let mut coeffs = (0..poly_size).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+                let start = Instant::now();
+                parallel_fft(&mut coeffs, &worker, &omega, log_n, worker.log_num_cpus());
+                println!("parallel FFT for size {} taken {:?}", poly_size, start.elapsed());
+
+
+                let log_n = log_n as usize;
+                for k in 0..poly_size {
+                    let rk = bitreverse(k, log_n);
+                    if k < rk {
+                        coeffs.swap(rk, k);
+                    }
+                }
+                coeffs
+            };
+
+            let res2 = {
+                let rng = &mut XorShiftRng::from_seed([0x3dbe6259, 0x8d313d76, 0x3237db17, 0xe5bc0654]);
+                let mut coeffs = (0..poly_size).map(|_| Fr::rand(rng)).collect::<Vec<_>>();
+                let start = Instant::now();
+                parallel_ct_ntt(&mut coeffs, &worker, log_n, worker.log_num_cpus(), &precomp);
+                println!("parallel NTT for size {} taken {:?}", poly_size, start.elapsed());
+
+                coeffs
+            };
+
+            assert!(res1 == res2);
+        }
+    }
+
+
+
+
+
 }
+
 
 
 

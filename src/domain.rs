@@ -454,7 +454,7 @@ pub fn create_fft_kernel<E>(log_d: usize, priority: bool) -> Option<gpu::FFTKern
 
 }
 
-fn best_fft_gpu<E: Engine, T: Group<E>>(
+pub fn best_fft_gpu<E: Engine, T: Group<E>>(
     kern: &mut Option<gpu::LockedFFTKernel<E>>,
     a: &mut [T],
     worker: &Worker,
@@ -493,8 +493,8 @@ pub fn gpu_fft<E: Engine, T: Group<E>>(
     // size.
     // For compatibility/performance reasons we decided to transmute the array to the desired type
     // as it seems safe and needs less modifications in the current structure of Bellman library.
-    let a = unsafe { std::mem::transmute::<&mut [T], &mut [E::Fr]>(a) };
-    kern.radix_fft(a, omega, log_n)?;
+    let b = unsafe { std::mem::transmute::<&mut [T], &mut [E::Fr]>(a) };
+    kern.radix_fft(b, omega, log_n)?;
     Ok(())
 }
 
@@ -679,15 +679,17 @@ fn test_fft_bn256() {
     let mut v2 = EvaluationDomain::from_coeffs(v2).unwrap();
 
     let start = std::time::Instant::now();
-    v2.ifft_gpu(&pool, &mut fft_kern);
+    v2.ifft_gpu(&pool, &mut fft_kern).unwrap();
     let duration_gpu = start.elapsed().as_nanos() as f64;
+
+    assert!(v1.coeffs == v2.coeffs);
     println!("GPU Elapsed {} ns for {} samples", duration_gpu, SAMPLES);
 
     println!("Tested on {} samples cpu/gpu {}" , SAMPLES, duration_cpu/duration_gpu );
 }
 
 #[test]
-pub fn gpu_fft_consistency() {
+pub fn gpu_fft_consistency_bls128() {
     use pairing::bls12_381::{Bls12, Fr};
     use std::time::Instant;
     use pairing::ff::ScalarEngine;
@@ -699,7 +701,7 @@ pub fn gpu_fft_consistency() {
     let log_cpus = worker.log_num_cpus();
     let mut kern = gpu::FFTKernel::create(1 << 24, false).expect("Cannot initialize kernel!");
 
-    for log_d in 1..25 {
+    for log_d in 1..10 {
         let d = 1 << log_d;
 
         let elems = (0..d)
@@ -717,11 +719,13 @@ pub fn gpu_fft_consistency() {
         println!("GPU took {}ms.", gpu_dur);
 
         now = Instant::now();
-        if log_d <= log_cpus {
-            serial_fft(&mut v2.coeffs, &v2.omega, log_d);
-        } else {
-            parallel_fft(&mut v2.coeffs, &worker, &v2.omega, log_d, log_cpus);
-        }
+        // if log_d <= log_cpus {
+        //     serial_fft(&mut v2.coeffs, &v2.omega, log_d);
+        // } else {
+        //     parallel_fft(&mut v2.coeffs, &worker, &v2.omega, log_d, log_cpus);
+        // }
+        best_fft( &mut v2.coeffs, &worker, &v2.omega, log_d);
+
         let cpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
         println!("CPU ({} cores) took {}ms.", 1 << log_cpus, cpu_dur);
 
@@ -730,4 +734,49 @@ pub fn gpu_fft_consistency() {
         assert!(v1.coeffs == v2.coeffs);
         println!("============================");
     }
+}
+
+#[test]
+pub fn gpu_fft_consistency_bn256() {
+    use pairing::bn256::{Bn256, Fr};
+    use std::time::Instant;
+    use pairing::ff::ScalarEngine;
+    use rand::{self, Rand};
+
+    let rng = &mut rand::thread_rng();
+
+    let worker = Worker::new();
+    let log_cpus = worker.log_num_cpus();
+    let mut kern = gpu::FFTKernel::create(1 << 24, false).expect("Cannot initialize kernel!");
+
+    for log_d in 3..10 {
+        let d = 1 << log_d;
+
+        let elems = (0..d)
+            .map(|_| Scalar::<Bn256>(Fr::rand(rng)))
+            .collect::<Vec<_>>();
+
+        let mut v1 = EvaluationDomain::from_coeffs(elems.clone()).unwrap();
+        let mut v2 = EvaluationDomain::from_coeffs(elems.clone()).unwrap();
+
+        println!("Testing FFT for {} elements...", d);
+
+        let mut now = Instant::now();
+        gpu_fft(&mut kern, &mut v1.coeffs, &v1.omega, log_d).expect("GPU FFT failed!");
+        let gpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("GPU took {}ms.", gpu_dur);
+
+        now = Instant::now();
+
+        best_fft( &mut v2.coeffs, &worker, &v2.omega, log_d);
+
+        let cpu_dur = now.elapsed().as_secs() * 1000 as u64 + now.elapsed().subsec_millis() as u64;
+        println!("CPU ({} cores) took {}ms.", 1 << log_cpus, cpu_dur);
+
+        println!("Speedup: x{}", cpu_dur as f32 / gpu_dur as f32);
+
+        assert!(v1.coeffs == v2.coeffs);
+        println!("============================");
+    }
+    drop(kern);
 }
