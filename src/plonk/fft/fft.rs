@@ -4,9 +4,12 @@ use crate::gpu::{self, GPUError, LockedFFTKernel};
 
 use crate::pairing::Engine;
 
-use crate::pairing::bn256::{self, Bn256};
+use crate::pairing::bn256::{self, Fr, Bn256};
 use crate::domain::{EvaluationDomain, Scalar};
 use crate::domain::{self,best_fft_gpu};
+use crate::plonk::fft::cooley_tukey_ntt::bitreverse as ntt_bitreverse;
+
+use crate::plonk::domains::Domain;
 
 use log::info;
 
@@ -21,6 +24,29 @@ fn log2_floor(num: usize) -> u32 {
     }
 
     pow
+}
+
+
+pub(crate) fn best_ct_ntt_2_best_fft_gpu<F: PrimeField>(
+    a: &mut [F],
+    worker: &Worker,
+    poly_size: usize,
+)
+{
+    let domain = Domain::<Fr>::new_for_size(poly_size as u64).unwrap();
+    let omega = domain.generator;
+    let omega_r = unsafe{std::mem::transmute::<&Fr, &F>(&omega)};
+    let log_n = domain.power_of_two as u32;
+    best_fft_bn256_gpu(a, worker, omega_r, log_n, None);
+
+    let log_n = log_n as usize;
+    for k in 0..poly_size {
+        let rk = ntt_bitreverse(k, log_n);
+        if k < rk {
+            a.swap(rk, k);
+        }
+    }
+
 }
 
 pub(crate) fn best_fft_bn256_gpu<F: PrimeField>(
