@@ -2456,7 +2456,9 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
 
         let mut coeffs: Vec<_> = this.coeffs;
         let exp = this.exp;
-        cooley_tukey_ntt::best_ct_ntt(&mut coeffs, worker, exp, Some(worker.cpus), precomputed_omegas);
+        // cooley_tukey_ntt::best_ct_ntt(&mut coeffs, worker, exp, Some(worker.cpus), precomputed_omegas);
+        bit_rev_best_ct_ntt_2_best_fft_gpu(&mut coeffs, &worker, exp, precomputed_omegas);
+
         let mut this = Polynomial::from_values(coeffs)?;
         
         this.bitreverse_enumeration(&worker);
