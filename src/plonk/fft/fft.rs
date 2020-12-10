@@ -4,14 +4,16 @@ use crate::gpu::{self, GPUError, LockedFFTKernel};
 
 use crate::pairing::Engine;
 
-use crate::pairing::bn256::{self, Fr, Bn256};
-use crate::domain::{EvaluationDomain, Scalar};
-use crate::domain::{self,best_fft_gpu};
-use crate::plonk::fft::cooley_tukey_ntt::bitreverse as ntt_bitreverse;
 
-use crate::plonk::domains::Domain;
+use crate::pairing::bn256::{self, Bn256,Fr};
+use crate::domain::{EvaluationDomain, Scalar};
+use crate::domain::{self, best_fft_gpu};
+use crate::plonk::fft::cooley_tukey_ntt::{bitreverse as ntt_bitreverse, CTPrecomputations, BitReversedOmegas, OmegasInvBitreversed};
+
+use crate::plonk::domains::*;
 
 use log::info;
+use crate::plonk::fft::cooley_tukey_ntt;
 
 
 fn log2_floor(num: usize) -> u32 {
@@ -27,15 +29,42 @@ fn log2_floor(num: usize) -> u32 {
 }
 
 
-pub(crate) fn bit_rev_best_ct_ntt_2_best_fft_gpu<F: PrimeField>(
+pub(crate) fn bit_rev_best_ct_ntt_2_best_fft_gpu<F: PrimeField, P: CTPrecomputations<F>>(
     a: &mut [F],
     worker: &Worker,
-    omega: &F,
     log_n: u32,
+    precomputed_omegas: &P
 )
 {
-    best_fft_bn256_gpu(a, worker, omega, log_n, None);
+    info!("begin bit_rev_best_ct_ntt_2_best_fft_gpu");
+    assert_eq!(a.len(), (1<<log_n) as usize);
+
+    let omega_1 = BitReversedOmegas::<Fr>::new_for_domain_size(4).omegas[1];
+    let omega_1_r = unsafe{std::mem::transmute::<&Fr, &F>(&omega_1)};
+    let omegas_inv_1 = OmegasInvBitreversed::<Fr>::new_for_domain_size(4).omegas[1];
+    let omegas_inv_1_r = unsafe{std::mem::transmute::<&Fr, &F>(&omegas_inv_1)};
+
+    let omegas_precom_1 = precomputed_omegas.bit_reversed_omegas()[1];
+
     let poly_size = a.len();
+
+    let domain = Domain::<F>::new_for_size(poly_size as u64).unwrap();
+    let omega = domain.generator;
+    let omega_inv = domain.generator.inverse().expect("must exist");
+
+    if *omega_1_r == omegas_precom_1 {
+        info!("use best_fft_bn256_gpu with omega");
+        best_fft_bn256_gpu(a, worker, &omega, log_n, None);
+    }
+    else if  *omegas_inv_1_r == omegas_precom_1 {
+        info!("use best_fft_bn256_gpu with omega_inv");
+        best_fft_bn256_gpu(a, worker, &omega_inv, log_n, None);
+    }
+    else {
+        info!("use native cooley_tukey_ntt::best_ct_ntt");
+        cooley_tukey_ntt::best_ct_ntt(a, worker, log_n, Some(worker.cpus), precomputed_omegas);
+    }
+
     let log_n = log_n as usize;
     for k in 0..poly_size {
         let rk = ntt_bitreverse(k, log_n);
@@ -43,9 +72,8 @@ pub(crate) fn bit_rev_best_ct_ntt_2_best_fft_gpu<F: PrimeField>(
             a.swap(rk, k);
         }
     }
-
+    info!("end bit_rev_best_ct_ntt_2_best_fft_gpu");
 }
-
 
 // can only be used to omega, cannot be used omegaInv
 pub(crate) fn best_ct_ntt_2_best_fft_gpu<F: PrimeField>(
