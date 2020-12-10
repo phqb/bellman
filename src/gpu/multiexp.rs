@@ -216,7 +216,7 @@ where
         let num_groups = calc_num_groups(self.core_count, num_windows);
 
         let mut res = vec![<G as CurveAffine>::Projective::zero(); num_groups * num_windows];
-        info!("MP: start let texps = unsafe");
+        // info!("MP: start let texps = unsafe");
         let texps = unsafe {
             std::mem::transmute::<
                 &[<<G::Engine as ScalarEngine>::Fr as PrimeField>::Repr],
@@ -224,7 +224,7 @@ where
             >(exps)
         };
         self.exp_buffer.write(texps).enq()?;
-        info!("MP: end let texps = unsafe");
+        // info!("MP: end let texps = unsafe");
 
         // Make global work size divisible by `LOCAL_WORK_SIZE`
         let mut gws = num_windows * num_groups;
@@ -232,14 +232,14 @@ where
 
         let sz = std::mem::size_of::<G>(); // Trick, used for dispatching between G1 and G2!
         if sz == std::mem::size_of::<E::G1Affine>() {
-            info!("MP: start g1 let tbases = unsafe");
+            // info!("MP: start g1 let tbases = unsafe");
             let tbases = unsafe {
                 &*(bases as *const [G]
                     as *const [structs::CurveAffineStruct<<E as Engine>::G1Affine>])
             };
             self.g1_base_buffer.write(tbases).enq()?;
-            info!("MP: end g1 let tbases = unsafe");
-            info!("MP: start g1 let kernel = self");
+            // info!("MP: end g1 let tbases = unsafe");
+            // info!("MP: start g1 let kernel = self");
             let kernel = self
                 .proque
                 .kernel_builder("G1_bellman_multiexp")
@@ -256,26 +256,26 @@ where
             unsafe {
                 kernel.enq()?;
             }
-            info!("MP: end g1 let kernel = self");
-            info!("MP: start g1 let tres = unsafe");
+            // info!("MP: end g1 let kernel = self");
+            // info!("MP: start g1 let tres = unsafe");
             let tres = unsafe {
                 &mut *(&mut res as *mut Vec<<G as CurveAffine>::Projective>
                     as *mut Vec<structs::CurveProjectiveStruct<<E as Engine>::G1>>)
             };
-            info!("MP: end g1 let tres = unsafe");
-            info!("MP : start g1 self.g1_result_buffer.read");
+            // info!("MP: end g1 let tres = unsafe");
+            // info!("MP : start g1 self.g1_result_buffer.read");
             self.g1_result_buffer.read(tres).enq()?;
-            info!("MP : end g1 self.g1_result_buffer.read");
+            // info!("MP : end g1 self.g1_result_buffer.read");
         } else if sz == std::mem::size_of::<E::G2Affine>() {
-            info!("MP: start g2 let tbases = unsafe");
+            // info!("MP: start g2 let tbases = unsafe");
             let tbases = unsafe {
                 &*(bases as *const [G]
                     as *const [structs::CurveAffineStruct<<E as Engine>::G2Affine>])
             };
             self.g2_base_buffer.write(tbases).enq()?;
-            info!("MP: end g2 let tbases = unsafe");
+            // info!("MP: end g2 let tbases = unsafe");
 
-            info!("MP: start g2 let kernel = self");
+            // info!("MP: start g2 let kernel = self");
             let kernel = self   // GPU running & no CPU
                 .proque
                 .kernel_builder("G2_bellman_multiexp")
@@ -292,22 +292,22 @@ where
             unsafe {
                 kernel.enq()?;
             }
-            info!("MP: end g2 let kernel = self");
-            info!("MP: start g2 let tres = unsafe");
+            // info!("MP: end g2 let kernel = self");
+            // info!("MP: start g2 let tres = unsafe");
             let tres = unsafe {
                 &mut *(&mut res as *mut Vec<<G as CurveAffine>::Projective>
                     as *mut Vec<structs::CurveProjectiveStruct<<E as Engine>::G2>>)
             };
-            info!("MP: end g2 let tres = unsafe");
-            info!("MP : start g2 self.g2_result_buffer.read");
+            // info!("MP: end g2 let tres = unsafe");
+            // info!("MP : start g2 self.g2_result_buffer.read");
             self.g2_result_buffer.read(tres).enq()?;
-            info!("MP : end g2 self.g2_result_buffer.read");
+            // info!("MP : end g2 self.g2_result_buffer.read");
         } else {
             return Err(GPUError::Simple("Only E::G1 and E::G2 are supported!"));
         }
 
         // singe CPU: my test [1s 66%CPU]  -> multi CPUS
-        info!("*************begin accumulating the result************");
+        // info!("*************begin accumulating the result************");
         // Using the algorithm below, we can calculate the final result by accumulating the results
         // of those `NUM_GROUPS` * `NUM_WINDOWS` threads.
         let mut acc = <G as CurveAffine>::Projective::zero();
@@ -322,7 +322,7 @@ where
             }
             bits += w; // Process the next window
         }
-        info!("*************end accumulating the result************");
+        // info!("*************end accumulating the result************");
 
         Ok(acc)
     }

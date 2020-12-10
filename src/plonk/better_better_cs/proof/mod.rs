@@ -24,6 +24,8 @@ use std::io::{Read, Write};
 
 use crate::plonk::better_cs::keys::*;
 
+use log::info;
+
 pub fn write_tuple_with_one_index<F: PrimeField, W: Write>(
     tuple: &(usize, F),
     mut writer: W
@@ -313,6 +315,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         let num_state_polys = <Self as ConstraintSystem<E>>::Params::STATE_WIDTH;
         let num_witness_polys = <Self as ConstraintSystem<E>>::Params::WITNESS_WIDTH;
 
+        info!("self.make_assembled_poly_storage");
         let mut values_storage = self.make_assembled_poly_storage(worker, true)?;
 
         let required_domain_size = self.n() + 1;
@@ -322,6 +325,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
         let omegas_inv_bitreversed = <OmegasInvBitreversed::<E::Fr> as CTPrecomputations::<E::Fr>>::new_for_domain_size(required_domain_size);
 
         // if we simultaneously produce setup then grab permutation polys in values forms
+        info!(" if S::PRODUCE_SETUP");
         if S::PRODUCE_SETUP {
             let permutation_polys = self.make_permutations(&worker)?;
             assert_eq!(permutation_polys.len(), num_state_polys);
@@ -352,6 +356,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
             self.max_constraint_degree.next_power_of_two()
         );
 
+        info!(" let mut monomials_storage = Self::create_monomial_storage");
         // much time - multi thread
         let mut monomials_storage = Self::create_monomial_storage(
             &worker, 
@@ -362,6 +367,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
 
         monomials_storage.extend_from_setup(setup)?;
 
+        info!(" for i in 0..num_state_polys");
         // step 1 - commit state and witness, enumerated. Also commit sorted polynomials for table arguments
         for i in 0..num_state_polys {
             let key = PolyIdentifier::VariablesPolynomial(i);
@@ -380,6 +386,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
             proof.state_polys_commitments.push(commitment);
         }
 
+        info!("for i in 0..num_witness_polys");
         for i in 0..num_witness_polys {
             let key = PolyIdentifier::VariablesPolynomial(i);
             let poly_ref = monomials_storage.get_poly(key);
@@ -396,7 +403,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
 
             proof.witness_polys_commitments.push(commitment);
         }
-
+        info!("let mut lookup_data: Option<data_structures::LookupDataHolder<E>>");
         // step 1.5 - if there are lookup tables then draw random "eta" to linearlize over tables
         let mut lookup_data: Option<data_structures::LookupDataHolder<E>> = if self.tables.len() > 0 {
             let eta = transcript.get_challenge();
@@ -449,6 +456,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
 
             let witness_len = required_domain_size - 1;
 
+            info!("let f_poly_values_aggregated");
             let f_poly_values_aggregated = {
                 let mut table_contributions_values = if S::PRODUCE_SETUP {
                     self.calculate_masked_lookup_entries(&values_storage)?
@@ -489,6 +497,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
                 Polynomial::from_values_unpadded(f_poly_values_aggregated)?
             };
 
+            info!("let (t_poly_values, t_poly_values_shifted, t_poly_monomial)");
             let (t_poly_values, t_poly_values_shifted, t_poly_monomial) = if S::PRODUCE_SETUP {
                 // these are unsorted rows of lookup tables
                 let mut t_poly_ends = self.calculate_t_polynomial_values_for_single_application_tables()?;
@@ -542,7 +551,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
 
                     current.mul_assign(&eta);
                 }
-
+                info!("let mut t_poly_values = t_poly_values_monomial_aggregated");
                 // let mut t_poly_values = t_poly_values_monomial_aggregated.clone().fft(&worker);
                 let mut t_poly_values = t_poly_values_monomial_aggregated.clone().fft_using_bitreversed_ntt(
                     &worker,
@@ -565,7 +574,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
                     PolynomialProxy::from_owned(t_poly_values_monomial_aggregated)
                 )
             };
-
+            info!("let (s_poly_monomial, s_poly_unpadded_values, s_shifted_unpadded_values)");
             let (s_poly_monomial, s_poly_unpadded_values, s_shifted_unpadded_values) = {
                 let mut s_poly_ends = self.calculate_s_poly_contributions_from_witness()?;
                 assert_eq!(s_poly_ends.len(), 4);
@@ -607,6 +616,7 @@ impl<E: Engine, P: PlonkConstraintSystemParams<E>, MG: MainGate<E>, S: Synthesis
                 )
             };
 
+            info!(" let s_poly_commitment = commit_using_monomials");
             let s_poly_commitment = commit_using_monomials(
                 &s_poly_monomial,
                 mon_crs,
