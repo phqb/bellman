@@ -2423,8 +2423,8 @@ impl<F: PrimeField> Polynomial<F, Coefficients> {
                     if coset_generator != one {
                         distribute_powers_with_num_cpus(&mut r[from..to], &worker, coset_generator, num_cpus_hint.expect("is some"));
                     }
-                    cooley_tukey_ntt::best_ct_ntt(&mut r[from..to], &worker, log_n, num_cpus_hint, precomputed_omegas);
-                    // bit_rev_best_ct_ntt_2_best_fft_gpu(&mut r[from..to], &worker, log_n,precomputed_omegas);
+                    // cooley_tukey_ntt::best_ct_ntt(&mut r[from..to], &worker, log_n, num_cpus_hint, precomputed_omegas);
+                    bit_rev_best_ct_ntt_2_best_fft_gpu(&mut r[from..to], &worker, log_n,precomputed_omegas);
                 });
             }
         });
