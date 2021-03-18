@@ -1,7 +1,7 @@
 use crate::ff::*;
 use super::{PartialReductionField, PartialTwoBitReductionField};
 
-#[derive(Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, Default, Hash)]
 pub struct FrRepr(pub [u64; 4usize]);
 
 pub struct Fr(FrRepr);
@@ -376,12 +376,18 @@ impl ::rand::Rand for Fr {
     }
 }
 
+impl std::hash::Hash for Fr {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
 impl From<Fr> for FrRepr {
     fn from(e: Fr) -> FrRepr {
         e.into_repr()
     }
 }
-    
+
 impl crate::ff::PrimeField for Fr {
     type Repr = FrRepr;
 

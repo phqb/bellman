@@ -35,6 +35,11 @@ macro_rules! transparent_engine_impl {
             }
         }
 
+        impl std::fmt::Debug for $engine {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                f.write_str(stringify!($engine))
+            }
+        }
 
         impl crate::pairing::CurveProjective for $fr {
             type Affine = $fr;
@@ -190,7 +195,7 @@ macro_rules! transparent_engine_impl {
                 (&self, &self)
             }
 
-            fn into_xy_unchecked(&self) -> (Self::Base, Self::Base) {
+            fn into_xy_unchecked(self) -> (Self::Base, Self::Base) {
                 (<$fr as crate::ff::Field>::zero(), <$fr as crate::ff::Field>::zero())
             }
 
@@ -200,6 +205,14 @@ macro_rules! transparent_engine_impl {
 
             fn from_xy_checked(_x: Self::Base, _y: Self::Base) -> Result<Self, crate::pairing::GroupDecodingError> {
                 Ok(<$fr as crate::ff::Field>::zero())
+            }
+
+            fn a_coeff() -> Self::Base {
+                unimplemented!()
+            }
+
+            fn b_coeff() -> Self::Base {
+                unimplemented!()
             }
         }
 
